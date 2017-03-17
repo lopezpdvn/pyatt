@@ -1,3 +1,4 @@
+import sys
 import sqlite3
 from datetime import timedelta, datetime
 from os.path import join
@@ -12,12 +13,31 @@ ON r.task_id = t._id
 WHERE LOWER(t.name) LIKE ? AND r.start >= ? AND r.end <= ?
 ORDER BY start"""
 
+DISTINCT_TASKS_QUERY = """
+SELECT COUNT(name), name
+FROM tasks
+GROUP BY name
+HAVING COUNT(name) > 1"""
+
 CATEGORY_SEP = '/'
 
-def _att_file_get_category_efforts(categories, attf, start, end):
-    query = CATEGORY_EFFORTS_QUERY
-    con = sqlite3.connect(attf)
+def android_localized_collation(s0, s1):
+    if s0 == s1:
+        return 0
+    elif s0 < s1:
+        return -1
+    else:
+        return 1
+
+def dbconnect(att_db_fp):
+    con = sqlite3.connect(att_db_fp)
+    con.create_collation('LOCALIZED', android_localized_collation)
     con.row_factory = sqlite3.Row
+    return con
+
+def _att_db_fp_get_category_efforts(categories, att_db_fp, start, end):
+    query = CATEGORY_EFFORTS_QUERY
+    con = dbconnect(att_db_fp)
     for ctg in categories:
         ctg_sel = ctg + CATEGORY_SEP + '%'
         effort_time = timedelta()
@@ -31,13 +51,26 @@ def _att_file_get_category_efforts(categories, attf, start, end):
 def get_category_efforts(categories, start, end, paths):
     efforts = {}
     for path in paths:
-        for attf in iglob(join(path, '*'+FILE_EXT)):
-            for ctg, eff in _att_file_get_category_efforts(categories, attf,
-                    start, end):
+        for att_db_fp in iglob(join(path, '*'+FILE_EXT)):
+            for ctg, eff in _att_db_fp_get_category_efforts(categories,
+                    att_db_fp, start, end):
                 efforts[ctg] = efforts.get(ctg, timedelta()) + eff
 
     return efforts.items()
 
+def validate_categories_distinct(att_db_fp):
+    MSGTMPL = 'Duplicate tasks with subject `{}` in file `{}`'
+    query = DISTINCT_TASKS_QUERY
+    con = dbconnect(att_db_fp)
+    for row in con.execute(query):
+        print(MSGTMPL.format(row['name'], att_db_fp), file=sys.stderr)
+        return False
+    return True
+
 def validate(cfgdirs):
     '''Implement validation later'''
+    for cfgdir in cfgdirs:
+        for att_db_fp in iglob(join(cfgdir, '*'+FILE_EXT)):
+            if not validate_categories_distinct(att_db_fp):
+                return False
     return True
