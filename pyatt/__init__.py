@@ -5,6 +5,7 @@ from os.path import join
 from glob import iglob
 
 FILE_EXT = '.db'
+TIMESTAMP_UNITS_FACTOR = 1000
 
 CATEGORY_EFFORTS_QUERY = """
 SELECT t.name 'task_name', r.start 'start', r.end 'end'
@@ -52,6 +53,23 @@ def att_db_fp_get_category_efforts(categories, att_db_fp, start, end):
             effort_time += (tend - tstart)
         yield (ctg, effort_time)
 
+def att_db_fp_get_category_efforts_details(categories, att_db_fp, start, end):
+    query = CATEGORY_EFFORTS_QUERY
+    con = dbconnect(att_db_fp)
+    tskefts = []
+    for ctg in categories:
+        ctg_sel = ctg + CATEGORY_SEP + '%'
+        args = (ctg_sel, start.timestamp()*TIMESTAMP_UNITS_FACTOR,
+                end.timestamp()*TIMESTAMP_UNITS_FACTOR)
+        for row in con.execute(query, args):
+            tskeft = {'task': row['task_name'], 'category': ctg}
+            tskeft['start'] = datetime.fromtimestamp(
+                    row['start']/TIMESTAMP_UNITS_FACTOR)
+            tskeft['end'] = datetime.fromtimestamp(
+                    row['end']/TIMESTAMP_UNITS_FACTOR)
+            tskefts.append(tskeft)
+    return tskefts
+
 def get_category_efforts(categories, start, end, paths):
     efforts = {}
     for path in paths:
@@ -61,6 +79,16 @@ def get_category_efforts(categories, start, end, paths):
                 efforts[ctg] = efforts.get(ctg, timedelta()) + eff
 
     return efforts.items()
+
+def get_category_efforts_details(categories, start, end, paths):
+    tskefts = []
+    for path in paths:
+        for att_db_fp in iglob(join(path, '*'+FILE_EXT)):
+            for tskeft in att_db_fp_get_category_efforts_details(categories,
+                    att_db_fp, start, end):
+                tskefts.append(tskeft)
+
+    return tskefts
 
 def validate_categories_distinct(att_db_fp):
     MSGTMPL = 'Duplicate tasks with subject `{}` in file `{}`'
